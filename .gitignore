@@ -1,0 +1,26 @@
+# 模型權重（體積龐大，由 make download 下載）
+models/
+
+# stable-diffusion.cpp 預先編譯的執行檔（由 make install 下載）
+bin/
+
+# 從原始碼編譯 stable-diffusion.cpp 時的工作目錄
+.sdcpp-src/
+
+# 產生的圖片與執行期檔案
+outputs/
+logs/
+*.pid
+
+# 本機設定
+.env
+
+# 作業系統與編輯器
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
