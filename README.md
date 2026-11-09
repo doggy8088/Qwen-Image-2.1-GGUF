@@ -1,5 +1,7 @@
 # Qwen-Image 2.1 GGUF × OpenAI 相容圖片 API
 
+[![CI](https://github.com/doggy8088/Qwen-Image-2.1-GGUF/actions/workflows/ci.yml/badge.svg)](https://github.com/doggy8088/Qwen-Image-2.1-GGUF/actions/workflows/ci.yml)
+
 在本機以 [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) 的 `sd-server` 推論
 [abenzerps/Qwen-Image-2.1-Turbo-Quantized](https://huggingface.co/abenzerps/Qwen-Image-2.1-Turbo-Quantized)，
 提供與 OpenAI Images API 相容的 `/v1/images/generations` 與 `/v1/images/edits` 端點。
@@ -267,6 +269,7 @@ make start    QUANT=Q8_0 TE_QUANT=Q4_K_M
 | `make curl-test` | 以 curl 產生一張 512x512 的測試圖片 |
 | `make config` | 顯示目前的設定值與模型路徑 |
 | `make lint` | 以 shellcheck 與 ruff 檢查腳本 |
+| `make test` | 執行 `scripts/client.py` 單元測試（CI 也會跑，見 `.github/workflows/ci.yml`） |
 | `make clean` | 刪除 `outputs/` 與 `logs/` |
 | `make distclean` | 另外刪除 `bin/` 與 sd.cpp 原始碼（保留模型） |
 
