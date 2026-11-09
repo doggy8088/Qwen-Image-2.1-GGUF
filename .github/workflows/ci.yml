@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (shellcheck + ruff)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 與本機驗證版本對齊，避免 format 規則隨 ruff 升級漂移
+      - name: Install ruff
+        run: pip install "ruff==0.17.4"
+
+      # shellcheck 已預裝於 GitHub Ubuntu runner
+      - name: ShellCheck
+        run: shellcheck scripts/*.sh
+
+      - name: Ruff check
+        run: ruff check scripts tests
+
+      - name: Ruff format
+        run: ruff format --check scripts tests
+
+  test:
+    name: Unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: pip install "openai>=1.99"
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+  makefile:
+    name: Makefile smoke tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: help / config 預設值（防止模型來源與檔名再次漂移，見 issue #2）
+        run: |
+          make help > /dev/null
+          make config | tee config.txt
+          grep -q "abenzerps/Qwen-Image-2.1-Turbo-Quantized" config.txt
+          grep -q "models/qwen-image-2.1-turbo-Q4_K_M.gguf" config.txt
+
+      - name: download 指向現行倉庫與檔名
+        run: |
+          make -n download | tee download.txt
+          grep -q "abenzerps/Qwen-Image-2.1-Turbo-Quantized" download.txt
+          grep -q "qwen-image-2.1-turbo-Q4_K_M.gguf" download.txt
+
+      - name: LoRA 目錄存在才傳 --lora-model-dir
+        run: |
+          if make -n serve | grep -q -- "--lora-model-dir"; then
+            echo "models/loras 不存在時不應出現 --lora-model-dir" >&2
+            exit 1
+          fi
+          mkdir -p models/loras
+          make -n serve | grep -q -- "--lora-model-dir models/loras"
+
+      - name: generate / download-lora 的 LoRA 展開
+        run: |
+          make -n generate PROMPT=test LORA='a.safetensors:0.8 b.safetensors' | tee generate.txt
+          test "$(grep -o -- "--lora" generate.txt | wc -l)" -eq 2
+          grep -q -- "--lora 'a.safetensors:0.8'" generate.txt
+          make -n download-lora | grep -q "lightx2v/Qwen-Image-2.1-Lightning"

@@ -294,8 +294,12 @@ curl-test: ## 以 curl 直接呼叫 /v1/images/generations 做煙霧測試
 .PHONY: lint
 lint: ## 檢查 shell 與 Python 腳本
 	shellcheck scripts/*.sh
-	$(UV) run --quiet --with ruff ruff check scripts
-	$(UV) run --quiet --with ruff ruff format --check scripts
+	$(UV) run --quiet --with ruff ruff check scripts tests
+	$(UV) run --quiet --with ruff ruff format --check scripts tests
+
+.PHONY: test
+test: ## 執行 client.py 單元測試
+	$(UV) run --quiet --with openai python -m unittest discover -s tests -v
 
 .PHONY: clean
 clean: ## 刪除產生的圖片與記錄檔
