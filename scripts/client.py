@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import math
 import os
 import sys
 import time
@@ -47,7 +48,8 @@ def parse_lora(spec: str) -> dict:
         except ValueError:
             pass
         else:
-            return {"path": path, "multiplier": multiplier, "is_high_noise": False}
+            if math.isfinite(multiplier):
+                return {"path": path, "multiplier": multiplier, "is_high_noise": False}
     return {"path": spec, "multiplier": 1.0, "is_high_noise": False}
 
 
