@@ -7,6 +7,7 @@
 
 範例：
     uv run scripts/client.py generate "一隻戴著墨鏡的柴犬" --size 1024x1024
+    uv run scripts/client.py generate "一隻柴犬" --lora style.safetensors:0.8
     uv run scripts/client.py edit "把背景換成夕陽海灘" -i outputs/input.png
     uv run scripts/client.py models
 
@@ -32,6 +33,24 @@ from openai import OpenAI
 DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1"
 
 
+def parse_lora(spec: str) -> dict:
+    """解析 --lora 規格「路徑[:權重]」為 sd-server 的結構化 lora 欄位。
+
+    路徑是相對於伺服器 --lora-model-dir 目錄的檔名；權重（multiplier）
+    預設 1.0。sd-server 不支援 prompt 內嵌 <lora:...> 標籤，只能用此格式。
+    只有最後一段能解析為數字時才視為權重，其餘情形整串皆為路徑。
+    """
+    path, sep, weight = spec.rpartition(":")
+    if sep and path:
+        try:
+            multiplier = float(weight)
+        except ValueError:
+            pass
+        else:
+            return {"path": path, "multiplier": multiplier, "is_high_noise": False}
+    return {"path": spec, "multiplier": 1.0, "is_high_noise": False}
+
+
 def build_prompt(args: argparse.Namespace) -> str:
     """將 sd.cpp 原生參數以 sd_cpp_extra_args 附加到 prompt。"""
     extra: dict = {}
@@ -48,6 +67,8 @@ def build_prompt(args: argparse.Namespace) -> str:
         extra["seed"] = args.seed
     if args.negative:
         extra["negative_prompt"] = args.negative
+    if getattr(args, "lora", None):
+        extra["lora"] = [parse_lora(spec) for spec in args.lora]
     if not extra:
         return args.prompt
     return f"{args.prompt} <sd_cpp_extra_args>{json.dumps(extra, ensure_ascii=False)}</sd_cpp_extra_args>"
@@ -106,6 +127,13 @@ def add_gen_options(p: argparse.ArgumentParser, size_default: str | None, format
     p.add_argument("--seed", type=int, help="隨機種子；< 0 代表每次隨機")
     p.add_argument("--sampler", help="取樣器，例如 euler、euler_a、dpm++2m")
     p.add_argument("--negative", help="負面提示詞（需搭配 --cfg 大於 1）")
+    p.add_argument(
+        "--lora",
+        action="append",
+        default=None,
+        metavar="PATH[:WEIGHT]",
+        help="LoRA：相對於伺服器 LoRA 目錄的檔名，可加 :權重（預設 1.0，常見範圍 0.6–1.0）；可重複指定多個",
+    )
     p.add_argument("-o", "--out-dir", type=Path, default=Path("outputs"), help="輸出目錄（預設：outputs）")
 
 

@@ -1,6 +1,6 @@
 # Qwen-Image 2.1 GGUF × OpenAI 相容圖片 API
 #
-# 以 stable-diffusion.cpp 的 sd-server 推論 abenzerps/Qwen-Image-2.1-GGUF，
+# 以 stable-diffusion.cpp 的 sd-server 推論 abenzerps/Qwen-Image-2.1-Turbo-Quantized，
 # 並提供 /v1/images/generations 與 /v1/images/edits 端點。
 #
 # 執行 make help 查看所有指令。所有變數都可以在命令列覆寫，例如：
@@ -26,11 +26,17 @@ QUANT      ?= Q4_K_M
 TE         ?= gguf
 # TE=gguf 時的量化版本：Q4_K_M（5.03 GB）| Q8_0（8.71 GB）| F16（16.39 GB）
 TE_QUANT   ?= Q8_0
-HF_REPO    ?= abenzerps/Qwen-Image-2.1-GGUF
+# 擴散模型來源：原 abenzerps/Qwen-Image-2.1-GGUF 已由作者更名
+# （曾名 Qwen-Image-2.1-Uncensored-GGUF，舊名在 HF 上皆 redirect 到此倉庫），
+# 檔名也改為 qwen-image-2.1-turbo-<QUANT>.gguf，舊的無前綴與 UC- 檔名已不存在。
+HF_REPO    ?= abenzerps/Qwen-Image-2.1-Turbo-Quantized
 TE_REPO    ?= Qwen/Qwen3-VL-8B-Instruct-GGUF
 MODELS_DIR ?= models
 
-DIFFUSION_FILE := qwen-image-2.1-$(QUANT).gguf
+# 擴散模型檔名前綴（不含量化版本）。使用其他來源或本機已有的舊版檔案時覆寫，
+# 例如舊版非 Turbo 檔案：DIFFUSION_PREFIX=qwen-image-2.1-
+DIFFUSION_PREFIX ?= qwen-image-2.1-turbo-
+DIFFUSION_FILE := $(DIFFUSION_PREFIX)$(QUANT).gguf
 VAE_FILE       := vae/qwen_image_2.1_vae_bf16.safetensors
 VISION_FILE    :=
 ifeq ($(TE),gguf)
@@ -50,6 +56,17 @@ MODEL_FILES := $(DIFFUSION_FILE) $(LLM_FILE) $(VISION_FILE) $(VAE_FILE)
 
 HF     ?= $(shell command -v hf 2>/dev/null || echo "uvx --from huggingface_hub hf")
 SHA256 ?= $(shell command -v sha256sum 2>/dev/null || echo "shasum -a 256")
+
+# ---------------------------------------------------------------------------
+# LoRA（.safetensors，與 GGUF 擴散模型分開存放）
+# ---------------------------------------------------------------------------
+# 目錄存在時，SERVER_CMD 會自動加上 --lora-model-dir；請求時再由用戶端
+# 以結構化 lora 欄位指定要用哪個 LoRA（sd-server 不支援 prompt 內 <lora:...>）。
+LORA_DIR  ?= models/loras
+# make download-lora 的預設來源：Qwen-Image-2.1 專用的 Lightning 4 步 LoRA
+# （針對原版非 Turbo 底模訓練；目前預設的 Turbo 底模本身已蒸餾，不需要它）
+LORA_REPO ?= lightx2v/Qwen-Image-2.1-Lightning
+LORA_FILE ?= pytorch_lora_weights.safetensors
 
 # ---------------------------------------------------------------------------
 # stable-diffusion.cpp
@@ -85,6 +102,7 @@ SERVER_CMD = $(SD_SERVER) \
 	--llm $(MODELS_DIR)/$(LLM_FILE) \
 	$(if $(VISION_FILE),--llm_vision $(MODELS_DIR)/$(VISION_FILE)) \
 	--vae $(MODELS_DIR)/$(VAE_FILE) \
+	$(if $(wildcard $(LORA_DIR)),--lora-model-dir $(LORA_DIR)) \
 	-W $(WIDTH) -H $(HEIGHT) --steps $(STEPS) --cfg-scale $(CFG) \
 	--sampling-method $(SAMPLER) --seed $(SEED) \
 	$(SERVER_ARGS)
@@ -98,6 +116,8 @@ PROMPT      ?= A neon shop sign that reads "QWEN IMAGE 2.1", rainy night, reflec
 SIZE        ?= $(WIDTH)x$(HEIGHT)
 N           ?= 1
 IMAGE       ?=
+# LoRA 規格（空白分隔，可多個）：檔名[:權重]，例如 LORA='style.safetensors:0.8'
+LORA        ?=
 OUT_DIR     ?= outputs
 CLIENT_ARGS ?=
 UV          ?= uv
@@ -118,6 +138,8 @@ config: ## 顯示目前的設定值與模型路徑
 	@echo "文字編碼器        : $(MODELS_DIR)/$(LLM_FILE)"
 	@echo "視覺權重          : $(if $(VISION_FILE),$(MODELS_DIR)/$(VISION_FILE),（內含於文字編碼器）)"
 	@echo "VAE               : $(MODELS_DIR)/$(VAE_FILE)"
+	@echo "模型來源          : $(HF_REPO)"
+	@echo "LoRA 目錄         : $(LORA_DIR)（$(if $(wildcard $(LORA_DIR)),啟動時會傳 --lora-model-dir,目錄不存在，不啟用)）"
 	@echo "監聽位址          : $(HOST):$(PORT)"
 	@echo "預設尺寸/步數/CFG : $(WIDTH)x$(HEIGHT) / $(STEPS) / $(CFG)"
 	@echo "取樣器/種子       : $(SAMPLER) / $(SEED)"
@@ -158,10 +180,18 @@ build-sdcpp: ## 從原始碼編譯 sd.cpp（CUDA 等無預先編譯版本的平�
 
 .PHONY: download
 download: ## 從 Hugging Face 下載模型（QUANT、TE、TE_QUANT 可調整）
-	$(HF) download $(HF_REPO) $(HF_FILES) SHA256SUMS --local-dir $(MODELS_DIR)
+	$(HF) download $(HF_REPO) $(HF_FILES) SHA256SUMS --local-dir $(MODELS_DIR) || { \
+		echo "下載失敗：請確認 HF_REPO=$(HF_REPO) 存在，且其中有 $(DIFFUSION_FILE) 等檔案（QUANT=$(QUANT)、DIFFUSION_PREFIX=$(DIFFUSION_PREFIX)）。原 abenzerps/Qwen-Image-2.1-GGUF 已更名為 abenzerps/Qwen-Image-2.1-Turbo-Quantized，詳見 README 的「模型檔案」。"; exit 1; }
 ifneq ($(TE_FILES),)
 	$(HF) download $(TE_REPO) $(notdir $(TE_FILES)) --local-dir $(MODELS_DIR)/text_encoders
 endif
+
+.PHONY: download-lora
+download-lora: ## 下載 LoRA 到 LORA_DIR（預設 Qwen-Image-2.1 Lightning；LORA_REPO、LORA_FILE 可覆寫）
+	$(HF) download $(LORA_REPO) $(LORA_FILE) --local-dir $(LORA_DIR) || { \
+		echo "下載失敗：請確認 LORA_REPO=$(LORA_REPO) 存在，且其中有 $(LORA_FILE)。"; exit 1; }
+	@echo "已下載：$(LORA_DIR)/$(LORA_FILE)"
+	@echo "重新啟動伺服器（make restart）後，以 LORA='$(LORA_FILE):1.0' 傳給 make generate 使用；LoRA 必須與底模版本相容。"
 
 .PHONY: verify
 verify: ## 驗證已下載模型檔案的 SHA256
@@ -236,14 +266,18 @@ logs: ## 即時查看 sd-server 記錄檔
 models: ## 呼叫 GET /v1/models
 	@curl -sf $(BASE_URL)/models && echo
 
+.PHONY: loras
+loras: ## 列出 sd-server 已發現的 LoRA（GET /sdapi/v1/loras）
+	@curl -sf http://$(CLIENT_HOST):$(PORT)/sdapi/v1/loras && echo
+
 .PHONY: generate
-generate: ## 以 OpenAI SDK 文字生圖（PROMPT、SIZE、N 可調整）
-	$(CLIENT) generate '$(subst ','\'',$(PROMPT))' --size $(SIZE) -n $(N) -o $(OUT_DIR) $(CLIENT_ARGS)
+generate: ## 以 OpenAI SDK 文字生圖（PROMPT、SIZE、N、LORA 可調整）
+	$(CLIENT) generate '$(subst ','\'',$(PROMPT))' --size $(SIZE) -n $(N) -o $(OUT_DIR) $(foreach l,$(LORA),--lora '$(l)') $(CLIENT_ARGS)
 
 .PHONY: edit
-edit: ## 以 OpenAI SDK 編輯圖片（必須指定 IMAGE）
+edit: ## 以 OpenAI SDK 編輯圖片（必須指定 IMAGE；PROMPT、LORA 可調整）
 	@test -n '$(IMAGE)' || { echo "請指定 IMAGE，例如：make edit IMAGE=outputs/in.png PROMPT='把背景換成夕陽海灘'"; exit 1; }
-	$(CLIENT) edit '$(subst ','\'',$(PROMPT))' $(foreach img,$(IMAGE),-i $(img)) -n $(N) -o $(OUT_DIR) $(CLIENT_ARGS)
+	$(CLIENT) edit '$(subst ','\'',$(PROMPT))' $(foreach img,$(IMAGE),-i $(img)) -n $(N) -o $(OUT_DIR) $(foreach l,$(LORA),--lora '$(l)') $(CLIENT_ARGS)
 
 .PHONY: curl-test
 curl-test: ## 以 curl 直接呼叫 /v1/images/generations 做煙霧測試
