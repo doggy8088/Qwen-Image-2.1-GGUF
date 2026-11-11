@@ -43,7 +43,7 @@ flowchart LR
 
 | 項目 | 需求 |
 | --- | --- |
-| 作業系統 | macOS（Apple Silicon）或 Linux x86_64；其他平台可用 `make build-sdcpp` 自行編譯 |
+| 作業系統 | macOS（Apple Silicon）或 Linux x86_64；`make install` 下載的 Linux 預先編譯版目前僅提供 **Ubuntu 24.04**（見[疑難排解](#疑難排解)）；Ubuntu 22.04 等較舊發行版請改用 `make build-sdcpp` 自行編譯 |
 | 記憶體 | 預設組合約佔用 14 GB（擴散模型 4.1 GB + 文字編碼器 8.8 GB + VAE 0.6 GB），建議 32 GB 以上 |
 | 硬碟空間 | 預設組合約 15 GB |
 | 工具 | `make`、`curl`、`unzip`、`python3`、[uv](https://docs.astral.sh/uv/)、[hf](https://huggingface.co/docs/huggingface_hub/guides/cli)（沒有 `hf` 時會自動改用 `uvx`） |
@@ -347,6 +347,30 @@ HF_HUB_DISABLE_XET=1 make download
 **圖片編輯無法輸出 webp**
 
 sd-server 的 `/v1/images/edits` 只支援 `png` 與 `jpeg`，文字生圖則另外支援 `webp`。
+
+**Ubuntu 22.04 與 glibc 相容性**
+
+`make install` 會從 [stable-diffusion.cpp Releases](https://github.com/leejet/stable-diffusion.cpp/releases) 下載 Linux 預先編譯版；目前僅提供 **Ubuntu 24.04** 的 `x86_64` / `vulkan` / `rocm` 套件，**沒有 Ubuntu 22.04 專用版本**。
+
+在 Ubuntu 22.04 上執行 `make setup` 時，下載可能成功，但 `sd-server` 啟動會因 glibc 版本不足而失敗，例如：
+
+```text
+$ make setup
+==> 查詢 leejet/stable-diffusion.cpp 的 Release：master-898-2bb7294
+==> 下載 sd-master-2bb7294-bin-Linux-Ubuntu-24.04-x86_64.zip
+########################################################################### 100.0%
+==> 解壓縮到 bin
+==> 完成：bin/sd-server: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found (required by bin/sd-server)
+```
+
+Ubuntu 22.04 內建 glibc 2.35，無法直接執行上述 24.04 預先編譯版。請改從原始碼編譯：
+
+```bash
+sudo apt install cmake build-essential git
+make build-sdcpp
+```
+
+若使用 NVIDIA 顯示卡，另需安裝 CUDA Toolkit；偵測到 `nvcc` 時會自動加上 `-DSD_CUDA=ON`。需要 Vulkan 加速時可加上 `SDCPP_CMAKE_FLAGS="-DSD_VULKAN=ON"`。
 
 **Linux 使用 NVIDIA 顯示卡**
 
